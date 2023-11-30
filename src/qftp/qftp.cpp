@@ -51,7 +51,12 @@
 #include "qtcpsocket.h"
 #include "qurlinfo.h"
 #include "qstringlist.h"
-#include "qregexp.h"
+#if (QT_VERSION <= QT_VERSION_CHECK(6,0,0))
+    #include "qregexp.h"
+#else
+    #include "qregularexpression.h"
+#endif
+
 #include "qtimer.h"
 #include "qfileinfo.h"
 #include "qhash.h"
@@ -326,7 +331,13 @@ void QFtpDTP::connectToHost(const QString & host, quint16 port)
     socket->setObjectName(QLatin1String("QFtpDTP Passive state socket"));
     connect(socket, SIGNAL(connected()), SLOT(socketConnected()));
     connect(socket, SIGNAL(readyRead()), SLOT(socketReadyRead()));
+
+#if (QT_VERSION <= QT_VERSION_CHECK(6,0,0))
     connect(socket, SIGNAL(error(QAbstractSocket::SocketError)), SLOT(socketError(QAbstractSocket::SocketError)));
+#else
+    connect(socket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)), SLOT(socketError(QAbstractSocket::SocketError)));
+#endif
+
     connect(socket, SIGNAL(disconnected()), SLOT(socketConnectionClosed()));
     connect(socket, SIGNAL(bytesWritten(qint64)), SLOT(socketBytesWritten(qint64)));
 
@@ -623,6 +634,7 @@ bool QFtpDTP::parseDir(const QByteArray &buffer, const QString &userName, QUrlIn
     QString bufferStr = QString::fromLatin1(buffer).trimmed();
 
     // Unix style FTP servers
+#if (QT_VERSION <= QT_VERSION_CHECK(6,0,0))
     QRegExp unixPattern(QLatin1String("^([\\-dl])([a-zA-Z\\-]{9,9})\\s+\\d+\\s+(\\S*)\\s+"
                                       "(\\S*)\\s+(\\d+)\\s+(\\S+\\s+\\S+\\s+\\S+)\\s+(\\S.*)"));
     if (unixPattern.indexIn(bufferStr) == 0) {
@@ -637,6 +649,24 @@ bool QFtpDTP::parseDir(const QByteArray &buffer, const QString &userName, QUrlIn
         _q_parseDosDir(dosPattern.capturedTexts(), userName, info);
         return true;
     }
+#else
+    QRegularExpression unixPattern(QLatin1String("^([\\-dl])([a-zA-Z\\-]{9,9})\\s+\\d+\\s+(\\S*)\\s+"
+                                      "(\\S*)\\s+(\\d+)\\s+(\\S+\\s+\\S+\\s+\\S+)\\s+(\\S.*)"));
+    QRegularExpressionMatch match = unixPattern.match(bufferStr);
+    if (match.hasMatch()) {
+        _q_parseUnixDir(match.capturedTexts(), userName, info);
+        return true;
+    }
+
+    QRegularExpression dosPattern("^(\\d\\d-\\d\\d-\\d\\d\\d?\\d?\\ \\ \\d\\d:\\d\\d[AP]M)\\s+"
+                                 "(<DIR>|\\d+)\\s+(\\S.*)$");
+
+    match = dosPattern.match(bufferStr);
+    if (match.hasMatch()) {
+        _q_parseDosDir(match.capturedTexts(), userName, info);
+        return true;
+    }
+#endif
 
     // Unsupported
     return false;
@@ -744,7 +774,16 @@ void QFtpDTP::socketConnectionClosed()
         clearData();
     }
 
-    bytesFromSocket = socket->readAll();
+    // check if socket is open before reading data
+    if (socket->isOpen())
+    {
+        bytesFromSocket = socket->readAll();
+    }
+    else
+    {
+        bytesFromSocket.clear();
+    }
+
 #if defined(QFTPDTP_DEBUG)
     qDebug("QFtpDTP::connectState(CsClosed)");
 #endif
@@ -768,7 +807,11 @@ void QFtpDTP::setupSocket()
     socket->setObjectName(QLatin1String("QFtpDTP Active state socket"));
     connect(socket, SIGNAL(connected()), SLOT(socketConnected()));
     connect(socket, SIGNAL(readyRead()), SLOT(socketReadyRead()));
+#if (QT_VERSION <= QT_VERSION_CHECK(6,0,0))
     connect(socket, SIGNAL(error(QAbstractSocket::SocketError)), SLOT(socketError(QAbstractSocket::SocketError)));
+#else
+    connect(socket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)), SLOT(socketError(QAbstractSocket::SocketError)));
+#endif
     connect(socket, SIGNAL(disconnected()), SLOT(socketConnectionClosed()));
     connect(socket, SIGNAL(bytesWritten(qint64)), SLOT(socketBytesWritten(qint64)));
 
@@ -806,8 +849,14 @@ QFtpPI::QFtpPI(QObject *parent) :
             SLOT(connectionClosed()));
     connect(&commandSocket, SIGNAL(readyRead()),
             SLOT(readyRead()));
+#if (QT_VERSION <= QT_VERSION_CHECK(6,0,0))
     connect(&commandSocket, SIGNAL(error(QAbstractSocket::SocketError)),
             SLOT(error(QAbstractSocket::SocketError)));
+#else
+    connect(&commandSocket, SIGNAL(errorOccurred(QAbstractSocket::SocketError)),
+            SLOT(error(QAbstractSocket::SocketError)));
+#endif
+
 
     connect(&dtp, SIGNAL(connectState(int)),
              SLOT(dtpConnectState(int)));
@@ -942,9 +991,17 @@ void QFtpPI::readyRead()
             }
         }
         QString endOfMultiLine;
+        endOfMultiLine.resize(4);//Fix bug"Using QCharRef with an index pointing outside the valid range of a QString. The corresponding behavior is deprecated, and will be changed in a future version of Qt."
+#if (QT_VERSION <= QT_VERSION_CHECK(6,0,0))
         endOfMultiLine[0] = '0' + replyCode[0];
         endOfMultiLine[1] = '0' + replyCode[1];
         endOfMultiLine[2] = '0' + replyCode[2];
+#else
+        endOfMultiLine[0] = QLatin1Char('0' + replyCode[0]);
+        endOfMultiLine[1] = QLatin1Char('0' + replyCode[1]);
+        endOfMultiLine[2] = QLatin1Char('0' + replyCode[2]);
+#endif
+
         endOfMultiLine[3] = QLatin1Char(' ');
         QString lineCont(endOfMultiLine);
         lineCont[3] = QLatin1Char('-');
@@ -1058,6 +1115,7 @@ bool QFtpPI::processReply()
         // both examples where the parenthesis are used, and where
         // they are missing. We need to scan for the address and host
         // info.
+#if (QT_VERSION <= QT_VERSION_CHECK(6,0,0))
         QRegExp addrPortPattern(QLatin1String("(\\d+),(\\d+),(\\d+),(\\d+),(\\d+),(\\d+)"));
         if (addrPortPattern.indexIn(replyText) == -1) {
 #if defined(QFTPPI_DEBUG)
@@ -1071,6 +1129,29 @@ bool QFtpPI::processReply()
             waitForDtpToConnect = true;
             dtp.connectToHost(host, port);
         }
+#else
+        QRegularExpression addrPortPattern("(\\d+),(\\d+),(\\d+),(\\d+),(\\d+),(\\d+)");
+        QRegularExpressionMatch match = addrPortPattern.match(replyText);
+        if (!match.hasMatch())
+        {
+#if defined(QFTPPI_DEBUG)
+            qDebug("QFtp: bad 227 response -- address and port information missing");
+#endif
+            // this error should be reported
+        } else {
+            QStringList lst;
+            for (int i = 0; i <= addrPortPattern.captureCount(); ++i) {
+                lst.append(match.captured(i));
+            }
+            QString host = lst[1] + QLatin1Char('.') + lst[2] + QLatin1Char('.') + lst[3] + QLatin1Char('.') + lst[4];
+            quint16 port = (lst[5].toUInt() << 8) + lst[6].toUInt();
+            waitForDtpToConnect = true;
+            dtp.connectToHost(host, port);
+        }
+
+#endif
+
+
     } else if (replyCodeInt == 229) {
         // 229 Extended Passive mode OK (|||10982|)
         int portPos = replyText.indexOf(QLatin1Char('('));
