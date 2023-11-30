@@ -1,4 +1,4 @@
-- [x] **已适配Qt5.15.2以及Qt6.6.0**
+- [x] 已适配Qt5.15.2以及Qt6.6.0
 This repository contains deprecated APIs which have been removed from Qt
 
 Applications are recommended to port to the supported APIs.
